@@ -35,8 +35,6 @@
 #include "mipi_dsi.h"
 
 #define DISPDRV_MIPI			"mipi_dsi"
-#define ROUND_UP(x)			((x)+1)
-#define NS2PS_RATIO			(1000)
 #define NUMBER_OF_CHUNKS		(0x8)
 #define NULL_PKT_SIZE			(0x8)
 #define PHY_BTA_MAXTIME			(0xd00)
@@ -47,14 +45,20 @@
 #define DSI_GEN_PLD_DATA_BUF_ENTRY	(0x10)
 #define	MIPI_MUX_CTRL(v)		(((v) & 0x3) << 4)
 #define	MIPI_LCD_SLEEP_MODE_DELAY	(120)
-#define	MIPI_DSI_REG_RW_TIMEOUT		(20)
-#define	MIPI_DSI_PHY_TIMEOUT		(10)
+#define	MIPI_DSI_REG_RW_TIMEOUT		(200)
+#define	MIPI_DSI_PHY_TIMEOUT		(100)
 
 static struct mipi_dsi_match_lcd mipi_dsi_lcd_db[] = {
 #ifdef CONFIG_FB_MXC_TRULY_WVGA_SYNC_PANEL
 	{
 	 "TRULY-WVGA",
 	 {mipid_hx8369_get_lcd_videomode, mipid_hx8369_lcd_setup}
+	},
+#endif
+#ifdef CONFIG_FB_MXC_MIPI_RM68200
+	{
+	 "OSD050T2844",
+	 {mipid_rm68200_get_lcd_videomode, mipid_rm68200_lcd_setup}
 	},
 #endif
 	{
@@ -139,7 +143,7 @@ static int mipi_dsi_pkt_write(struct mipi_dsi_info *mipi_dsi,
 				MIPI_DSI_CMD_PKT_STATUS, &status);
 			while ((status & DSI_CMD_PKT_STATUS_GEN_PLD_W_FULL) ==
 					 DSI_CMD_PKT_STATUS_GEN_PLD_W_FULL) {
-				msleep(1);
+				udelay(100);
 				timeout++;
 				if (timeout == MIPI_DSI_REG_RW_TIMEOUT)
 					return -EIO;
@@ -151,7 +155,7 @@ static int mipi_dsi_pkt_write(struct mipi_dsi_info *mipi_dsi,
 		if (len > 0) {
 			while ((status & DSI_CMD_PKT_STATUS_GEN_PLD_W_FULL) ==
 					 DSI_CMD_PKT_STATUS_GEN_PLD_W_FULL) {
-				msleep(1);
+				udelay(100);
 				timeout++;
 				if (timeout == MIPI_DSI_REG_RW_TIMEOUT)
 					return -EIO;
@@ -173,7 +177,7 @@ static int mipi_dsi_pkt_write(struct mipi_dsi_info *mipi_dsi,
 	mipi_dsi_read_register(mipi_dsi, MIPI_DSI_CMD_PKT_STATUS, &status);
 	while ((status & DSI_CMD_PKT_STATUS_GEN_CMD_FULL) ==
 			 DSI_CMD_PKT_STATUS_GEN_CMD_FULL) {
-		msleep(1);
+		udelay(100);
 		timeout++;
 		if (timeout == MIPI_DSI_REG_RW_TIMEOUT)
 			return -EIO;
@@ -187,7 +191,7 @@ static int mipi_dsi_pkt_write(struct mipi_dsi_info *mipi_dsi,
 			 DSI_CMD_PKT_STATUS_GEN_CMD_EMPTY) ||
 			!((status & DSI_CMD_PKT_STATUS_GEN_PLD_W_EMPTY) ==
 			DSI_CMD_PKT_STATUS_GEN_PLD_W_EMPTY)) {
-		msleep(1);
+		udelay(100);
 		timeout++;
 		if (timeout == MIPI_DSI_REG_RW_TIMEOUT)
 			return -EIO;
@@ -219,7 +223,7 @@ static int mipi_dsi_pkt_read(struct mipi_dsi_info *mipi_dsi,
 	mipi_dsi_read_register(mipi_dsi, MIPI_DSI_CMD_PKT_STATUS, &val);
 	while ((val & DSI_CMD_PKT_STATUS_GEN_RD_CMD_BUSY) !=
 			 DSI_CMD_PKT_STATUS_GEN_RD_CMD_BUSY) {
-		msleep(1);
+		udelay(100);
 		timeout++;
 		if (timeout == MIPI_DSI_REG_RW_TIMEOUT)
 			return -EIO;
@@ -229,7 +233,7 @@ static int mipi_dsi_pkt_read(struct mipi_dsi_info *mipi_dsi,
 	/* wait for entire response stroed in FIFO */
 	while ((val & DSI_CMD_PKT_STATUS_GEN_RD_CMD_BUSY) ==
 			 DSI_CMD_PKT_STATUS_GEN_RD_CMD_BUSY) {
-		msleep(1);
+		udelay(100);
 		timeout++;
 		if (timeout == MIPI_DSI_REG_RW_TIMEOUT)
 			return -EIO;
@@ -308,7 +312,7 @@ static void mipi_dsi_dphy_init(struct mipi_dsi_info *mipi_dsi,
 
 	mipi_dsi_read_register(mipi_dsi, MIPI_DSI_PHY_STATUS, &val);
 	while ((val & DSI_PHY_STATUS_LOCK) != DSI_PHY_STATUS_LOCK) {
-		msleep(1);
+		udelay(100);
 		timeout++;
 		if (timeout == MIPI_DSI_PHY_TIMEOUT) {
 			dev_err(&mipi_dsi->pdev->dev,
@@ -320,7 +324,7 @@ static void mipi_dsi_dphy_init(struct mipi_dsi_info *mipi_dsi,
 	timeout = 0;
 	while ((val & DSI_PHY_STATUS_STOPSTATE_CLK_LANE) !=
 			DSI_PHY_STATUS_STOPSTATE_CLK_LANE) {
-		msleep(1);
+		udelay(100);
 		timeout++;
 		if (timeout == MIPI_DSI_PHY_TIMEOUT) {
 			dev_err(&mipi_dsi->pdev->dev,
@@ -334,6 +338,7 @@ static void mipi_dsi_dphy_init(struct mipi_dsi_info *mipi_dsi,
 static void mipi_dsi_enable_controller(struct mipi_dsi_info *mipi_dsi,
 				bool init)
 {
+	uint64_t	val64;
 	u32		val = 0;
 	u32		lane_byte_clk_period;
 	struct  fb_videomode *mode = mipi_dsi->mode;
@@ -379,19 +384,40 @@ static void mipi_dsi_enable_controller(struct mipi_dsi_info *mipi_dsi,
 		mipi_dsi_write_register(mipi_dsi, MIPI_DSI_CMD_MODE_CFG,
 				MIPI_DSI_CMD_MODE_CFG_EN_LOWPOWER);
 
-		 /* mipi lane byte clk period in ns unit */
-		lane_byte_clk_period = NS2PS_RATIO /
-				(lcd_config->max_phy_clk / BITS_PER_BYTE);
-		val  = ROUND_UP(mode->hsync_len * mode->pixclock /
-				NS2PS_RATIO / lane_byte_clk_period)
-				<< DSI_TME_LINE_CFG_HSA_TIME_SHIFT;
-		val |= ROUND_UP(mode->left_margin * mode->pixclock /
-				NS2PS_RATIO / lane_byte_clk_period)
-				<< DSI_TME_LINE_CFG_HBP_TIME_SHIFT;
-		val |= ROUND_UP((mode->left_margin + mode->right_margin +
+		 /* mipi lane byte clk period in 1/256 ps unit */
+		val64 = (8000000ULL * 256) + lcd_config->max_phy_clk - 1;
+		do_div(val64, lcd_config->max_phy_clk);
+		lane_byte_clk_period = (u32)val64;
+
+		val64 = (uint64_t)mode->hsync_len * mode->pixclock
+				* 256 + lane_byte_clk_period - 1;
+		do_div(val64, lane_byte_clk_period);
+		if (val64 >= (1 << 9)) {
+			dev_err(&mipi_dsi->pdev->dev, "hsync(%d) too large\n", (u32)val64);
+			val64 = (1 << 9) - 1;
+		}
+		val = (u32)val64 << DSI_TME_LINE_CFG_HSA_TIME_SHIFT;
+
+		val64 = (uint64_t)mode->left_margin * mode->pixclock
+				* 256 + lane_byte_clk_period - 1;
+		do_div(val64, lane_byte_clk_period);
+		if (val64 >= (1 << 9)) {
+			dev_err(&mipi_dsi->pdev->dev, "left_margin(%d) too large\n", (u32)val64);
+			val64 = (1 << 9) - 1;
+		}
+		val |= (u32)val64 << DSI_TME_LINE_CFG_HBP_TIME_SHIFT;
+
+		val64 = (uint64_t)(mode->left_margin + mode->right_margin +
 				mode->hsync_len + mode->xres) * mode->pixclock
-				/ NS2PS_RATIO / lane_byte_clk_period)
-				<< DSI_TME_LINE_CFG_HLINE_TIME_SHIFT;
+				* 256 + lane_byte_clk_period - 1;
+		do_div(val64, lane_byte_clk_period);
+		if (val64 >= (1 << 14)) {
+			dev_err(&mipi_dsi->pdev->dev, "total(%d) too large\n", (u32)val64);
+			val64 = (1 << 14) - 1;
+		}
+		val |= (u32)val64 << DSI_TME_LINE_CFG_HLINE_TIME_SHIFT;
+
+		pr_debug("%s:LINE_CFG=%x\n", __func__, val);
 		mipi_dsi_write_register(mipi_dsi, MIPI_DSI_TMR_LINE_CFG, val);
 
 		val = ((mode->vsync_len & DSI_VTIMING_CFG_VSA_LINES_MASK)
@@ -402,6 +428,7 @@ static void mipi_dsi_enable_controller(struct mipi_dsi_info *mipi_dsi,
 				<< DSI_VTIMING_CFG_VFP_LINES_SHIFT);
 		val |= ((mode->yres & DSI_VTIMING_CFG_V_ACT_LINES_MASK)
 				<< DSI_VTIMING_CFG_V_ACT_LINES_SHIFT);
+		pr_debug("%s:VTIMING_CFG=%x\n", __func__, val);
 		mipi_dsi_write_register(mipi_dsi, MIPI_DSI_VTIMING_CFG, val);
 
 		val = ((PHY_BTA_MAXTIME & DSI_PHY_TMR_CFG_BTA_TIME_MASK)
