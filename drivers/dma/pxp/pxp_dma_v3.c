@@ -3705,6 +3705,7 @@ static void __pxpdma_dostart(struct pxp_channel *pxp_chan)
 	struct pxp_layer_param *param = NULL;
 	struct pxp_pixmap *input, *output;
 	int i = 0, ret;
+	bool combine_enable = false;
 
 	memset(&pxp->pxp_conf_state.s0_param, 0,  sizeof(struct pxp_layer_param));
 	memset(&pxp->pxp_conf_state.out_param, 0,  sizeof(struct pxp_layer_param));
